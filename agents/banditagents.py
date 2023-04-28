@@ -27,14 +27,13 @@ class BaseBanditAgent():
         if self.observe_current_iteration:
             chosen_arm_id = agent2.arm_id_history[iter]
         else:
-            raise NotImplementedError
+            chosen_arm_id = agent2.best_arm_id
         return chosen_arm_id
 
     def get_agent2_observed_reward(self, agent2, iter):
         if self.observe_current_iteration:
             observed_reward = agent2.reward_history[iter]
         else:
-            #TODO: 
             raise NotImplementedError
         return observed_reward
 
@@ -101,7 +100,7 @@ class GreedyAgent(BaseBanditAgent):
                         #self.store_initial_rewards(initial_rewards, chosen_arm_id, observed_reward)
                         self.store_initial_rewards(agent2_observed_rewards, agent2_chosen_arm_id, agent2_observed_reward)
                     else: # choose to observe or pull an arm
-                        prob_observing = 1/(bandit.num_arm_ids+1)
+                        prob_observing = 1/(bandit.num_arms+1)
                         observe_this_iter = np.random.choice(2,p=[1-prob_observing, prob_observing])
                         if observe_this_iter:
                             # agent gets zero immediate reward for observing (essentially pulling the nonexistent nth+1 arm)
@@ -133,4 +132,4 @@ class GreedyAgent(BaseBanditAgent):
                 observed_reward = bandit.sample(chosen_arm_id)
             self.arm_id_history.append(chosen_arm_id)
             self.reward_history.append(observed_reward)
-        return None
+        return initial_rewards, agent2_observed_rewards
