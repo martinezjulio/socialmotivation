@@ -1,4 +1,6 @@
+from typing import Any
 import numpy as np
+
 
 class BaseBanditAgent():
     def __init__(self, config):
@@ -69,6 +71,7 @@ class BaseBanditAgent():
         else:
             initial_rewards[chosen_arm_id] = [observed_reward]
 
+
 class GreedyAgent(BaseBanditAgent):
     """
     Initially explore initial_rounds times and then stick to the best action.
@@ -133,3 +136,92 @@ class GreedyAgent(BaseBanditAgent):
             self.arm_id_history.append(chosen_arm_id)
             self.reward_history.append(observed_reward)
         return initial_rewards, agent2_observed_rewards
+
+
+class BaseSocialAgent():
+    """
+    Base class for social agents. Need to keep track of how much 
+    social reward an agent has given to all other agents        
+    """
+    def __init__(self, config):        
+        self.agent_id = config['agent_id']
+        self.num_iterations = config['num_iterations']
+        self.num_initial_rounds = config['num_initial_rounds']
+        self.decay = config['decay']
+        self.epsilon = config['epsilon']
+        self.optimistic = config['optimistic']
+        self.solver = config['solver']
+        # keep track of each agent's social score for itself and other agents
+        self.agent_scores = np.zeros(config['num_agents'])
+        self.agent_scores[self.agent_id] = config['self_appreciation']
+        self.cooking_competence =config['cooking_competence']
+        self.cooking_competence_delta = config['cooking_competence_delta']
+
+        self.arm_id_history = []
+        self.reward_history = []
+        self.best_arm_id = None
+        self.best_arm_mean_payoff = None
+        self.step = 0
+
+    def act(self, bandit):
+        raise NotImplementedError
+
+    def __call__(self, *args: Any, **kwds: Any) -> Any:
+        raise NotImplementedError
+
+    def update(self, reward):
+        raise NotImplementedError
+    
+
+class RandomContextAgent(BaseSocialAgent):
+    """
+    Randomly choose an arm at each iteration.
+    """
+    def __init__(self, config):
+        super().__init__(config)          
+        
+    def act(self, bandit):
+        chosen_arm_id = np.random.choice(bandit.arm_ids)
+        if chosen_arm_id == bandit.arm_ids[-1]:
+            self.arm_id_history.append(chosen_arm_id)
+        return chosen_arm_id
+    
+    def update(self, arm_id, reward):        
+        self.reward_history.append(reward)
+
+class EpisilonGreedyContextAgent(BaseSocialAgent):
+    """
+    Epislon greedy agent that chooses the best arm with probability 1-epsilon
+    """
+    def __init__(self, config):
+        super().__init__(config)
+
+    def act(self, bandit):                    
+        if self.step == 0:
+            self.arm_pay_offs = np.zeros(bandit.num_arms)
+            chosen_arm_id = np.random.choice(bandit.arm_ids)
+
+        if self.step < self.num_initial_rounds:
+            # random action for initial rounds
+            chosen_arm_id = np.random.choice(bandit.arm_ids)
+        else:
+            if self.best_arm_id is None:
+                # find best arm
+                mean_payoffs = self.arm_pay_offs / self.step
+                self.best_arm_id = np.argmax(mean_payoffs)
+                self.best_arm_mean_payoff = mean_payoffs[self.best_arm_id]  
+            if self.epsilon:                
+                if np.random.random() < self.epsilon:
+                    chosen_arm_id = np.random.choice(bandit.arm_ids)
+                else:
+                    chosen_arm_id = self.best_arm_id
+            else:
+                chosen_arm_id = self.best_arm_id
+
+        self.arm_id_history.append(chosen_arm_id)
+        self.step += 1
+        return chosen_arm_id
+
+    def update(self, arm_id, reward):
+        self.arm_pay_offs[arm_id] += reward
+        self.reward_history.append(reward)
