@@ -1,0 +1,23 @@
+bandit:
+  payoffs: [0.6, 0.4]
+  sampling_distribution: 'uniform'
+demonstrator:
+  num_iterations: 1000
+  num_initial_iterations: 100
+  random_agent: False
+  epsilon: 0.2
+  decay: 1
+  optimistic: False
+  social_agent: False
+learner:
+  num_iterations: 1000
+  num_initial_iterations: 100
+  random_agent: False
+  epsilon: 0.2
+  decay: 1
+  optimistic: False
+  social_agent: True
+  observe_simultaneously: False
+  observe_action_only: True
+  observe_current_iteration: True
+  prob_observe: # Leave blank for None

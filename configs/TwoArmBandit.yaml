@@ -1,0 +1,2 @@
+payoffs: [0.6, 0.4]
+sampling_distribution: 'uniform'
