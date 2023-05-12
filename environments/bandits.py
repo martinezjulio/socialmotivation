@@ -13,7 +13,7 @@ class Bandit():
             self.random_sample = np.random.random_sample # Uniform in [0,1)
 
 
-    def sample(self, arm_id: int) -> float:
+    def pull_arm(self, arm_id: int) -> float:
         '''
         inputs: arm_id: the arm being chosen
         return: 1 or 0 (1 is payoff percent of time for that arm, 0 otherwise)
@@ -21,3 +21,4 @@ class Bandit():
         #TODO: Fix problem when arm_id=None
         x = self.random_sample()
         return 1. if x < self.payoffs[arm_id] else 0.
+

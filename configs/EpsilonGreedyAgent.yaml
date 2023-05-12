@@ -17,7 +17,8 @@ learner:
   decay: 1
   optimistic: False
   social_agent: True
-  observe_simultaneously: False
+  observe_simultaneously: True
   observe_action_only: True
   observe_current_iteration: True
   prob_observe: # Leave blank for None
+  prob_arm_exclusion: 0.5 # 
