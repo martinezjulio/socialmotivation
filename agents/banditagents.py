@@ -63,9 +63,9 @@ class BaseBanditAgent(metaclass=ABCMeta):
             if  x < self.prob_arm_exclusion:
                 exclusion_arm_ids = list(self.agent2_payoffs.keys())
                 candidate_arm_ids = list(set(bandit.arm_ids) - set(exclusion_arm_ids))
-                print('bandit.arm_ids:', bandit.arm_ids)
-                print('exclusion_arm_ids:',exclusion_arm_ids)
-                print('candidate_arm_ids:',candidate_arm_ids)
+                #print('bandit.arm_ids:', bandit.arm_ids)
+                #print('exclusion_arm_ids:',exclusion_arm_ids)
+                #print('candidate_arm_ids:',candidate_arm_ids)
                 sampled_arm_id = np.random.choice(candidate_arm_ids).item()
         return sampled_arm_id
 
