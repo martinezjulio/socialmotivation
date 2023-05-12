@@ -51,7 +51,6 @@ class BaseBanditAgent(metaclass=ABCMeta):
         """
         raise NotImplementedError
 
-    @typechecked
     def get_agent2_chosen_arm_id(self, agent2, iter: int) -> int:
         """
         Retrieves the best arm id or chosen arm id on iteration iter by agent2
