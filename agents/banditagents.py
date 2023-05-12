@@ -39,7 +39,7 @@ class BaseBanditAgent(metaclass=ABCMeta):
             self.prob_observe = config['prob_observe']
             self.observe_simultaenously = config['observe_simultaneously'] # True or False (if False choice alternative)
             self.observe_action_only = config['observe_action_only'] # True or False (if False action and reward)
-            self.observe_current_iteration = config['observe_current_iteration'] # 'current', 'best'
+            self.observe_best_arm = config['observe_best_arm'] # 'current', 'best'
             self.prob_arm_exclusion = config['prob_arm_exclusion']
 
     def __call__(self):
@@ -56,16 +56,18 @@ class BaseBanditAgent(metaclass=ABCMeta):
         """
         Description: 
         """
+    
+        # When do i want to  probablistically exclude agent2's arms
+        #    1. the agent has to be social
+        #    2. the probability to exclude an arm must be greater than 0
+        #    3. when the social agent is observing agent2's best arm (because we don't want to exclude all arms potentially)
+
         sampled_arm_id = np.random.choice(bandit.arm_ids).item()
-        if (self.social_agent) and (self.observe_current_iteration == False) and (self.prob_arm_exclusion is not None) and (self.prob_arm_exclusion > 0.0): #TODO: include option for non-social and observing current iter agent to exclude arms
-            assert(self.prob_arm_exclusion <= 1), 'self.prob_arm_exclusion must be in (0,1] or None, instead got {}'.format(self.prob_arm_exclusion)
+        if (self.social_agent) and (self.observe_best_arm) and (self.prob_arm_exclusion is not None) and (self.prob_arm_exclusion > 0.0): #TODO: currently only works for when a social agent chooses its best arm
             x = np.random.random_sample()
             if  x < self.prob_arm_exclusion:
                 exclusion_arm_ids = list(self.agent2_payoffs.keys())
                 candidate_arm_ids = list(set(bandit.arm_ids) - set(exclusion_arm_ids))
-                #print('bandit.arm_ids:', bandit.arm_ids)
-                #print('exclusion_arm_ids:',exclusion_arm_ids)
-                #print('candidate_arm_ids:',candidate_arm_ids)
                 sampled_arm_id = np.random.choice(candidate_arm_ids).item()
         return sampled_arm_id
 
@@ -85,7 +87,7 @@ class BaseBanditAgent(metaclass=ABCMeta):
             the agent2 observed arm index
         """
         #assert(isinstance(agent2, BaseBanditAgent)),"agent2 must of be of type BaseBanditAgent, instead got {}".format(type(BaseBanditAgent))
-        if self.observe_current_iteration:
+        if self.observe_best_arm is False:
             chosen_arm_id = agent2.arm_id_history[iter]
         else:
             chosen_arm_id = agent2.best_arm_id
@@ -108,7 +110,7 @@ class BaseBanditAgent(metaclass=ABCMeta):
             the reward this agent observes as a result of agent2 choosing the observed arm id
         """
         #assert(isinstance(agent2, BaseBanditAgent)),"agent2 must of be of type BaseBanditAgent, instead got {}".format(type(BaseBanditAgent))
-        if self.observe_current_iteration:
+        if self.observe_best_arm is False:
             observed_reward = agent2.reward_history[iter]
         else:
             raise NotImplementedError
@@ -381,7 +383,6 @@ class UCBAgent(BaseBanditAgent):
             self.num_times_arm_id_chosen = None
             self.q_values = None
 
-
     def __call__(self, bandit: bandits.Bandit, agent2 = None, c: float = 0.3) -> None:   
         self.num_times_arm_id_chosen = {arm_id:0 for arm_id in bandit.arm_ids}
         self.q_values = {arm_id:0 for arm_id in bandit.arm_ids}
@@ -389,36 +390,66 @@ class UCBAgent(BaseBanditAgent):
             self.num_times_arm_id_chosen[len(bandit.arm_ids)] = 0
             self.q_values[len(bandit.arm_ids)] = 0
 
+        
+        num_arms = bandit.num_arms
+        if self.social_agent:
+            num_arms = bandit.num_arms + 1
 
-        # first pull all the arms twice to avoid division by zero error
-        for arm_id in range(bandit.num_arms + 1):
+        iter = 0
+        # first pull all the arms twice (including a social arm) to avoid division by zero error
+        for chosen_arm_id in range(num_arms):
             for _ in range(2):
-                if arm_id == bandit.num_arms:
-
+                if self.social_agent and chosen_arm_id == bandit.num_arms:
+                    observed_reward = 0.0
+                    agent2_chosen_arm_id, agent2_observed_reward = self.observe_agent2(agent2, bandit, iter)
+                    if agent2_chosen_arm_id is not None:
+                        self.store_payoffs(agent2_chosen_arm_id, agent2_observed_reward, self_agent=False)
+                        self.num_times_arm_id_chosen[agent2_chosen_arm_id] += 1
+                        combined_payoffs = self.combine_payoffs()
+                        self.q_values[agent2_chosen_arm_id] = sum(combined_payoffs[agent2_chosen_arm_id])/self.num_times_arm_id_chosen[agent2_chosen_arm_id]
                 else:
-                    observed_reward = bandit.pull_arm(arm_id)
-                    if arm_id in self.payoffs:
-                        self.pay_offs[arm_id].append(observed_reward)
-                    else:
-                        self.payoffs[arm_id] = [observed_reward]
-                    self.arm_id_history.append(arm_id)
-                    self.reward_history.append(observed_reward)
-                    self.num_of_times_arm_id_chosen[arm_id] += 1
-                    self.q_values[arm_id] = sum(self.payoffs[arm_id])/self.num_of_times_arm_id_chosen[arm_id]
+                    observed_reward = bandit.pull_arm(chosen_arm_id)
+                self.store_payoffs(chosen_arm_id, observed_reward)
+                self.arm_id_history.append(chosen_arm_id)
+                self.reward_history.append(observed_reward)
+                self.num_times_arm_id_chosen[chosen_arm_id] += 1
+                combined_payoffs = self.combine_payoffs()
+                self.q_values[chosen_arm_id] = sum(combined_payoffs[chosen_arm_id])/self.num_times_arm_id_chosen[chosen_arm_id]
+                iter+=1
 
         for iter in range(2*len(bandit.arm_ids), self.num_iterations):
-            values = [self.q_values[arm_id] + c*np.sqrt(np.log(iter)/self.num_of_times_arm_id_chosen[arm_id]) for arm_id in bandit.arm_ids]
-            arm_id = np.argmax(values)
-            observed_reward = bandit.pull_arm(arm_id)
-            self.payoffs[arm_id].append(observed_reward)
-            self.arm_id_history.append(arm_id)
-            self.reward_history.append(observed_reward)
+            if self.social_agent:
+                # sampling procedure
+                values = [(self.q_values[arm_id] + c*np.sqrt(np.log(iter)/self.num_times_arm_id_chosen[arm_id])).item() for arm_id in range(bandit.num_arms + 1)]
+                chosen_arm_id = np.argmax(values).item()
+                if chosen_arm_id < bandit.num_arms:
+                    observed_reward = bandit.pull_arm(chosen_arm_id)
+                else:
+                    observed_reward = 0.0
+                    agent2_chosen_arm_id, agent2_observed_reward = self.observe_agent2(agent2, bandit, iter)
+                    if agent2_chosen_arm_id is not None:
+                        self.store_payoffs(agent2_chosen_arm_id, agent2_observed_reward, self_agent=False)
+                        self.num_times_arm_id_chosen[agent2_chosen_arm_id] += 1
+                        combined_payoffs = self.combine_payoffs()
+                        self.q_values[agent2_chosen_arm_id] = sum(combined_payoffs[agent2_chosen_arm_id])/self.num_times_arm_id_chosen[agent2_chosen_arm_id]
+            else: # non-social
+                # sampling procedure
+                values = [(self.q_values[arm_id] + c*np.sqrt(np.log(iter)/self.num_times_arm_id_chosen[arm_id])).item() for arm_id in range(bandit.num_arms)]
+                chosen_arm_id = np.argmax(values).item() 
+                observed_reward = bandit.pull_arm(chosen_arm_id)
+            #self.payoffs[chosen_arm_id].append(observed_reward)
+            self.store_payoffs(chosen_arm_id, observed_reward)
+            self.num_times_arm_id_chosen[chosen_arm_id] += 1
+            combined_payoffs = self.combine_payoffs()
+            self.q_values[chosen_arm_id] = sum(combined_payoffs[chosen_arm_id])/self.num_times_arm_id_chosen[chosen_arm_id]
             
-            # update q values and no_of_times_per_action
-            self.num_of_times_arm_id_chosen[arm_id] += 1
-            self.q_values[arm_id] = sum(self.payoffs[arm_id])/self.num_of_times_arm_id_chosen[arm_id]
+            # set best arm as  the max from q-value (not the sampling procedure because sampling will always change q-value may actually converge)
+            self.best_arm_id = max(self.q_values, key=self.q_values.get).item() #TODO: Fix the return value, should be int, currently fixed with .item() but this is hacky
+            self.arm_id_history.append(chosen_arm_id)
+            self.reward_history.append(observed_reward)
         return None
 
+'''
 @typechecked
 class ThompsonAgent(BaseBanditAgent):
     """
@@ -446,4 +477,6 @@ class ThompsonAgent(BaseBanditAgent):
             alphas[chosen_arm_id] += observed_reward
             betas[chosen_arm_id] += (1-observed_reward)
         return None
+'''
+
 

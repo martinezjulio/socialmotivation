@@ -10,7 +10,6 @@ learner:
   social_agent: True
   observe_simultaneously: True
   observe_action_only: True
-  observe_current_iteration: True
+  observe_best_arm: True
   prob_observe: # Leave blank for None
-  prob_sample_nonsocial_arms: 
-  prob_arm_exclusion: 0.5 # 
+  prob_arm_exclusion: 1.0 # Probability to exclude the arms (ignored if observe_best_arm False)
