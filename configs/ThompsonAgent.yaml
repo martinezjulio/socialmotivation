@@ -4,6 +4,5 @@ demonstrator:
 learner:
   num_iterations: 500
   social_agent: True
-  observe_simultaneously: False
   observe_action_only: True
   observe_best_arm: False

@@ -2,8 +2,10 @@ demonstrator:
   num_iterations: 500
   social_agent: False
 learner:
+  num_initial_iterations: 10
   num_iterations: 500
   social_agent: True
-  observe_simultaneously: False
   observe_action_only: True
   observe_best_arm: False
+  prob_trust: 0.5
+  prob_observe: 0.025

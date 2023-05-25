@@ -36,11 +36,14 @@ class BaseBanditAgent(metaclass=ABCMeta):
         self.best_arm_mean_payoff = None
         if self.social_agent:
             self.agent2_payoffs = {}
-            self.prob_observe = config['prob_observe']
-            self.observe_simultaenously = config['observe_simultaneously'] # True or False (if False choice alternative)
             self.observe_action_only = config['observe_action_only'] # True or False (if False action and reward)
             self.observe_best_arm = config['observe_best_arm'] # 'current', 'best'
-            self.prob_arm_exclusion = config['prob_arm_exclusion']
+            if 'prob_observe' in config.keys(): 
+                self.prob_observe = config['prob_observe'] # used only in explore socially
+            if 'observe_simultaneously' in config.keys():
+                self.observe_simultaenously = config['observe_simultaneously'] # True or False (if False choice alternative)
+            if 'prob_arm_exclusion' in config.keys():
+                self.prob_arm_exclusion = config['prob_arm_exclusion']
 
     def __call__(self):
         """
@@ -222,7 +225,7 @@ class BaseBanditAgent(metaclass=ABCMeta):
         return chosen_arm_id, observed_reward, agent2_chosen_arm_id, agent2_observed_reward
 
 @typechecked
-class GreedyAgent(BaseBanditAgent):
+class Greedy(BaseBanditAgent):
     """
     A BaseBanditAgent child class to define an agent that initially explores for self.num_initial_rounds times and then greedily just selects the self.best_arm_id found.
 
@@ -297,7 +300,7 @@ class GreedyAgent(BaseBanditAgent):
         return None
 
 @typechecked
-class EpsilonGreedyAgent(BaseBanditAgent):
+class EpsilonGreedy(BaseBanditAgent):
     """
     A BaseBanditAgent child class to define an agent that uses the epsilon-greedy algorithm by performing the action with the best average
     payoff with the probability (1-epsilon), otherwise picks a random action to keep
@@ -372,7 +375,7 @@ class EpsilonGreedyAgent(BaseBanditAgent):
         return None
 
 @typechecked
-class UCBAgent(BaseBanditAgent):
+class UCB(BaseBanditAgent):
     """
     Uses the Q-value of the action (reward so far divided by the number of times chosen) as exploitation.
     Uses the c * square root of ln(t)/Nt(a) for exploration.
@@ -417,7 +420,7 @@ class UCBAgent(BaseBanditAgent):
                 self.q_values[chosen_arm_id] = sum(combined_payoffs[chosen_arm_id])/self.num_times_arm_id_chosen[chosen_arm_id]
                 iter+=1
 
-        for iter in range(2*len(bandit.arm_ids), self.num_iterations):
+        for iter in range(2*num_arms, self.num_iterations):
             if self.social_agent:
                 # sampling procedure
                 values = [(self.q_values[arm_id] + c*np.sqrt(np.log(iter)/self.num_times_arm_id_chosen[arm_id])).item() for arm_id in range(bandit.num_arms + 1)]
@@ -449,34 +452,134 @@ class UCBAgent(BaseBanditAgent):
             self.reward_history.append(observed_reward)
         return None
 
-'''
+
 @typechecked
-class ThompsonAgent(BaseBanditAgent):
+class Thompson(BaseBanditAgent):
     """
     Build up a probability model from the obtained rewards, and then samples from this to choose an action.
     The model provides a level of confidence in the rewards. Confidence increases as more samples are collected.
     """
     def __init__(self, config):
             super().__init__(config)
-            
-    def __call__(self, bandit: bandits.Bandit, agent2 = None) -> None:  
-
+            self.solver = 'ThomsonAgent'
+    
+    def __call__(self, bandit: bandits.Bandit, agent2 = None) -> None:
+        # initialize alphas and betas to all 1s
         alphas, betas = {arm_id:1 for arm_id in bandit.arm_ids}, {arm_id:1 for arm_id in bandit.arm_ids}
+        num_arms = bandit.num_arms
+        if self.social_agent:
+            alphas[bandit.num_arms] = 1
+            betas[bandit.num_arms] = 1
+            num_arms = bandit.num_arms + 1
 
-        for t in range(self.num_iterations):
-            chosen_arm_id = np.argmax([np.random.beta(alphas[arm_id], betas[arm_id]) for arm_id in bandit.num_arm_ids])
-            observed_reward = bandit.pull_arm(chosen_arm_id)
-            if chosen_arm_id in self.payoffs:
-                self.payoffs[chosen_arm_id].append(observed_reward)
+        for iter in range(self.num_iterations):
+            # sample from the beta distribution for each arm, and then choose arm with the largest value 
+            chosen_arm_id = np.argmax([np.random.beta(alphas[arm_id], betas[arm_id]) for arm_id in range(num_arms)]).item()
+            self.best_arm_id = chosen_arm_id
+            if chosen_arm_id == bandit.num_arms and self.social_agent:
+                observed_reward = 0.0
+                agent2_chosen_arm_id, agent2_observed_reward = self.observe_agent2(agent2, bandit, iter)
+                assert(agent2_chosen_arm_id is not None),"agent2_chosen_arm_id is None"
+                self.store_payoffs(agent2_chosen_arm_id, agent2_observed_reward, self_agent=False)
+                alphas[agent2_chosen_arm_id] += agent2_observed_reward # update alphas based on observations
+                betas[agent2_chosen_arm_id] += (1-agent2_observed_reward) # update betas based on observations
             else:
-                self.payoffs[chosen_arm_id] = [observed_reward]
-
-            self.arm_id_history.append(arm_id)
+                observed_reward = bandit.pull_arm(chosen_arm_id)
+            self.store_payoffs(chosen_arm_id, observed_reward, self_agent=True)
+            self.arm_id_history.append(chosen_arm_id)
             self.reward_history.append(observed_reward)
-
             alphas[chosen_arm_id] += observed_reward
             betas[chosen_arm_id] += (1-observed_reward)
         return None
-'''
+        
+@typechecked
+class ThompsonTrust(BaseBanditAgent):
+    """
+    By defintion a social agent 
+    With probability p_greedyagent the agent will choose the best observed arm of agent2, 
+    with probability p_observe will observe a non-social thompson agent
+    otherwise will sample according to thompson sampling
+    """
+    def __init__(self,config):
+        super().__init__(config)
+        self.solver = 'TrustingThompsonAgent'
+        self.num_initial_iterations = config['num_initial_iterations']
+        self.p_greedytrust = config['prob_trust']
+        self.p_observe = config['prob_observe']
+        self.p_thompson = 1.0 - self.p_greedytrust - self.p_observe
+        self.meta_options = ['trust', 'observe', 'thompson']
+        self.meta_distribution = [self.p_greedytrust, self.p_observe, self.p_thompson]
+        assert(self.p_greedytrust + self.p_observe + self.p_thompson == 1.0), "p_greedytrust + p_epsilon + p_thompson != 1.0"
+
+    def __call__(self, bandit: bandits.Bandit, agent2 = None) -> None:
+
+        alphas, betas = {arm_id:1 for arm_id in bandit.arm_ids}, {arm_id:1 for arm_id in bandit.arm_ids}
+        num_arms = bandit.num_arms
+        alphas[bandit.num_arms] = 1
+        betas[bandit.num_arms] = 1
+        num_arms = bandit.num_arms + 1
+
+
+        # initial iterations to get some data from agent2
+        for iter in range(self.num_initial_iterations):
+            chosen_arm_id = bandit.num_arms
+            observed_reward = 0.0
+            self.store_payoffs(chosen_arm_id, observed_reward, self_agent=True)
+            agent2_chosen_arm_id, agent2_observed_reward = self.observe_agent2(agent2, bandit, iter)
+            self.store_payoffs(agent2_chosen_arm_id, agent2_observed_reward, self_agent=False)
+            # update alphas and betas
+            alphas[chosen_arm_id] += observed_reward 
+            betas[chosen_arm_id] += (1.0-observed_reward)
+            alphas[agent2_chosen_arm_id] += agent2_observed_reward 
+            betas[agent2_chosen_arm_id] += (1.0-agent2_observed_reward)
+            # store history
+            self.arm_id_history.append(chosen_arm_id)
+            self.reward_history.append(observed_reward)
+        
+        # TODO: estimates by frequency of choosing arm, but could also be by average reward
+        agent2_estimated_best_arm_id = np.argmax(np.bincount(list(self.agent2_payoffs.keys()))).item()
+
+        # run for the rest of the iterations by choosing between the meta options
+        for iter in range(self.num_initial_iterations, self.num_iterations):
+            meta_choice = np.random.choice(self.meta_options, p=self.meta_distribution)
+
+            # Choose agent2's best estimated arm greedily
+            if meta_choice == 'trust':
+                chosen_arm_id = agent2_estimated_best_arm_id
+                observed_reward = bandit.pull_arm(chosen_arm_id)
+                self.store_payoffs(chosen_arm_id, observed_reward, self_agent=True)
+            
+            # Observe agent2 and re-estimate best arm
+            elif meta_choice == 'observe':
+                chosen_arm_id = bandit.num_arms
+                observed_reward = 0.0
+                self.store_payoffs(chosen_arm_id, observed_reward, self_agent=True)
+                agent2_chosen_arm_id, agent2_observed_reward = self.observe_agent2(agent2, bandit, iter)
+                self.store_payoffs(agent2_chosen_arm_id, agent2_observed_reward, self_agent=False)
+                # update alphas and betas
+                alphas[agent2_chosen_arm_id] += agent2_observed_reward 
+                betas[agent2_chosen_arm_id] += (1.0-agent2_observed_reward)
+                # re-estimate agent2's best arm
+                agent2_estimated_best_arm_id = np.argmax(np.bincount(list(self.agent2_payoffs.keys()))).item()
+            
+            # Choose arm according to Thompson sampling
+            elif meta_choice == 'thompson':
+                chosen_arm_id = np.argmax([np.random.beta(alphas[arm_id], betas[arm_id]) for arm_id in range(bandit.num_arms)]).item() # limit to bandit arms (no observe)
+                observed_reward = bandit.pull_arm(chosen_arm_id)
+                self.store_payoffs(chosen_arm_id, observed_reward, self_agent=True)
+            
+            # update alphas and betas
+            alphas[chosen_arm_id] += observed_reward 
+            betas[chosen_arm_id] += (1.0-observed_reward)
+            # store history
+            self.arm_id_history.append(chosen_arm_id)
+            self.reward_history.append(observed_reward)
+
+
+
+
+
+
+
 
 
