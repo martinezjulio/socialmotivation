@@ -7,11 +7,12 @@ class Bandit():
         self.arm_ids = np.arange(len(config['payoffs']))
         self.num_arms = len(config['payoffs'])
         self.payoffs = config['payoffs']
+        self.best_arm_id = np.argmax(self.payoffs).item() # only used for computing regret or for evaluation
         self.sampling_distribution = config['sampling_distribution']
            #TODO set seed
         if self.sampling_distribution == 'uniform': 
             self.random_sample = np.random.random_sample # Uniform in [0,1)
-
+        
 
     def pull_arm(self, arm_id: int) -> float:
         '''

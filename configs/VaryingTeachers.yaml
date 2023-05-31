@@ -1,0 +1,33 @@
+
+Description: "Varying the teachers from Bad (Random), Ok (EpsilonGreedy), Good (Thompson), to Optimal (Optimal)."
+num_iterations: 500
+num_episodes: 40
+ThompsonTrust_distributions:
+    p_trust: [0.25, 0.5, 0.75, 0.95, 1.0]
+    p_obs: [0.05, 0.05, 0.05, 0.05, 0.0]
+bandit:
+  sampling_distribution: 'uniform'
+  alphas: [0.5, 0.6] #[0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+  num_arms: [2, 4, 8, 16, 32, 64, 128]
+demonstrators:
+  solvers: ["Random", "EpsilonGreedy", "Thompson", "Optimal"]
+  Random:
+    social_agent: False
+  EpsilonGreedy:
+    num_initial_iterations: 100
+    epsilon: 0.2
+    decay: 1
+    optimistic: False
+    social_agent: False
+  Thompson:
+    social_agent: False
+  Optimal:
+    social_agent: False
+learners: 
+  solvers: ["ThompsonTrust", "ThompsonTrust", "ThompsonTrust", "ThompsonTrust"]
+  ThompsonTrust:
+    num_initial_iterations: 10    
+    social_agent: True
+    observe_action_only: True
+    observe_best_arm: True # TODO fix that that it estimates best arm from frequency
+

@@ -94,6 +94,9 @@ class BaseBanditAgent(metaclass=ABCMeta):
             chosen_arm_id = agent2.arm_id_history[iter]
         else:
             chosen_arm_id = agent2.best_arm_id
+            if chosen_arm_id is None:
+                arms_chosen_previously = np.unique(agent2.arm_id_history)
+                chosen_arm_id = np.random.choice(arms_chosen_previously).item()
         return chosen_arm_id
 
     def get_agent2_observed_reward(self, agent2, iter: int) -> float:
@@ -167,7 +170,7 @@ class BaseBanditAgent(metaclass=ABCMeta):
                 self.agent2_payoffs[chosen_arm_id] = [observed_reward]
         return None
 
-    def combine_payoffs(self) -> dict:
+    def combine_payoffs(self):
         """
         Description: 
 
@@ -224,6 +227,82 @@ class BaseBanditAgent(metaclass=ABCMeta):
                 observed_reward = bandit.pull_arm(chosen_arm_id) 
         return chosen_arm_id, observed_reward, agent2_chosen_arm_id, agent2_observed_reward
 
+
+@typechecked
+class Random(BaseBanditAgent):
+    """
+    A BaseBanditAgent child class to define an agent that randomly selects an arm on each iteration.
+    
+    Attributes
+    ----------
+    solver: str
+        Name of the solver, in this case 'RandomAgent'
+    """    
+    def __init__(self, config):
+        super().__init__(config)
+        self.solver = 'Random'
+    
+    def __call__(self, bandit: bandits.Bandit) -> None:
+        """
+        Description: Runs the Random agent algorithm for one episode on the given bandit.
+
+        Parameters
+        ----------
+        bandit : environment.Bandit
+            The bandit to run the agent on
+
+        Returns
+        -------
+        None
+
+        """
+        for iter in range(self.num_iterations):
+            chosen_arm_id = self.sample_arm_id(bandit) 
+            observed_reward = bandit.pull_arm(chosen_arm_id)
+            self.store_payoffs(chosen_arm_id, observed_reward)
+            self.best_arm_id = None # no such concept for a random agent
+            self.arm_id_history.append(chosen_arm_id)
+            self.reward_history.append(observed_reward)
+        return None
+
+@typechecked
+class Optimal(BaseBanditAgent):
+    """
+    An oracle BaseBanditAgent child class to define an agent that always selects the optimal arm on each iteration.
+
+    Attributes
+    ----------
+    solver: str
+        Name of the solver, in this case 'OptimalAgent'
+    """
+    def __init__(self, config):
+        super().__init__(config)
+        self.solver = 'Optimal'
+
+    def __call__(self, bandit: bandits.Bandit) -> None:
+        """
+        Description: Runs the Optimal agent algorithm for one episode on the given bandit.
+
+        Parameters
+        ----------
+        bandit : environment.Bandit
+            The bandit to run the agent on
+
+        Returns
+        -------
+        None
+
+        """
+        for iter in range(self.num_iterations):
+            observed_reward = bandit.pull_arm(bandit.best_arm_id)
+            self.store_payoffs(bandit.best_arm_id, observed_reward)
+            self.best_arm_id = bandit.best_arm_id
+            self.arm_id_history.append(bandit.best_arm_id)
+            self.reward_history.append(observed_reward)
+        return None
+
+
+
 @typechecked
 class Greedy(BaseBanditAgent):
     """
@@ -231,16 +310,13 @@ class Greedy(BaseBanditAgent):
 
     Atributes
     ---------
-    random_agent : bool
-        If True, this agent is random and will always select a random arm
     num_initial_iterations : int
-        The number of initial iterations the agent select arms randomly for (ignored if random_agent==True)
+        The number of initial iterations the agent select arms randomly for 
     solver: str
         Name of the solver, in this case 'GreedyAgent'
     """
     def __init__(self, config):
         super().__init__(config)
-        self.random_agent=config['random_agent']
         self.num_initial_iterations=config['num_initial_iterations']
         self.solver = 'GreedyAgent'
      
@@ -262,14 +338,6 @@ class Greedy(BaseBanditAgent):
         None
         """
         assert((agent2 is not None and self.social_agent) or (agent2 is None and not self.social_agent)), "Agent2 must be a Bandit Agent if a social agent, otherwise should be type None"
-
-        #initial_rewards = {} # agent rewards from self exploration
-        #agent2_observed_rewards = {} # store rewards this agent observed for agent2
-
-        if self.random_agent: 
-            # ignore initial interations when random agent 
-            # (i.e. random agents will just choose arms randomly -- not the estiamte of the best arm)
-            self.initial_iterations = self.num_iterations
 
         for iter in range(self.num_iterations):
             # choose a random arm in initial iterations
@@ -309,7 +377,7 @@ class EpsilonGreedy(BaseBanditAgent):
     Atributes
     ---------
     num_initial_iterations : int
-        The number of initial iterations the agent select arms randomly for (ignored if random_agent==True)
+        The number of initial iterations the agent select arms randomly for 
     epsilon: float
         the probability of choosing a random action (0<= epsilon <=1), epsilon 0 means no random actions, 1 means always action
     decay: float
@@ -537,7 +605,9 @@ class ThompsonTrust(BaseBanditAgent):
             self.reward_history.append(observed_reward)
         
         # TODO: estimates by frequency of choosing arm, but could also be by average reward
-        agent2_estimated_best_arm_id = np.argmax(np.bincount(list(self.agent2_payoffs.keys()))).item()
+        agent2_estimated_best_arm_id = np.argmax(
+            np.bincount(list(self.agent2_payoffs.keys()))
+            ).item()
 
         # run for the rest of the iterations by choosing between the meta options
         for iter in range(self.num_initial_iterations, self.num_iterations):
@@ -560,11 +630,15 @@ class ThompsonTrust(BaseBanditAgent):
                 alphas[agent2_chosen_arm_id] += agent2_observed_reward 
                 betas[agent2_chosen_arm_id] += (1.0-agent2_observed_reward)
                 # re-estimate agent2's best arm
-                agent2_estimated_best_arm_id = np.argmax(np.bincount(list(self.agent2_payoffs.keys()))).item()
+                agent2_estimated_best_arm_id = np.argmax(
+                    np.bincount(list(self.agent2_payoffs.keys()))
+                    ).item()
             
             # Choose arm according to Thompson sampling
             elif meta_choice == 'thompson':
-                chosen_arm_id = np.argmax([np.random.beta(alphas[arm_id], betas[arm_id]) for arm_id in range(bandit.num_arms)]).item() # limit to bandit arms (no observe)
+                chosen_arm_id = np.argmax(
+                    [np.random.beta(alphas[arm_id], betas[arm_id]) for arm_id in range(bandit.num_arms)]
+                    ).item() # limit to bandit arms (no observe)
                 observed_reward = bandit.pull_arm(chosen_arm_id)
                 self.store_payoffs(chosen_arm_id, observed_reward, self_agent=True)
             
